@@ -20,7 +20,7 @@ export default function PlasmaOrb() {
     scene.add(directionalLight, ambientLight)
 
     // Detail 6 is high-resolution while remaining safe for real-time rendering.
-    const geometry = new THREE.IcosahedronGeometry(0.6, 100)
+    const geometry = new THREE.IcosahedronGeometry(0.61, 80)
     const material = new THREE.ShaderMaterial({ vertexShader, fragmentShader })
     material.uniforms.uTime = { value: 0 }
     const shape = new THREE.Mesh(geometry, material)
@@ -38,7 +38,7 @@ export default function PlasmaOrb() {
     let time = 0
     const animate = () => {
       material.uniforms.uTime.value = time
-      time += 0.003
+      time += 0.008
       frameId = window.requestAnimationFrame(animate)
       renderer.render(scene, camera)
     }

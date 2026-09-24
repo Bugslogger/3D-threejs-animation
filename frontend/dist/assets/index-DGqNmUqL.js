@@ -3872,7 +3872,7 @@ varying vec2 vUv;
 varying float vDisplacement;
 
 void main() {
-    gl_FragColor = vec4(vec3(vDisplacement), 1.0);
+    gl_FragColor = vec4(vec3(0.15, 1.0, 0.05) * vDisplacement, 1.0);
 }
 `,YM=`uniform float uTime;
 
@@ -4014,4 +4014,4 @@ void main() {
 
     gl_Position = projectedPosition;
 }
-`;function qM(){const o=fp.useRef(null);return fp.useEffect(()=>{const e=o.current,n=new kM,r=new Xn(75,window.innerWidth/window.innerHeight,.1,1e3),a=new BM({canvas:e,antialias:!0});a.setSize(window.innerWidth,window.innerHeight);const u=new GM("#fff000",.75);u.position.set(5,5,5);const f=new WM("#ff00ff",.2);n.add(u,f);const d=new zf(1,6),p=new ki({vertexShader:YM,fragmentShader:XM});p.uniforms.uTime={value:0};const m=new pi(d,p);n.add(m),r.position.z=3;const _=()=>{r.aspect=window.innerWidth/window.innerHeight,r.updateProjectionMatrix(),a.setSize(window.innerWidth,window.innerHeight)};let x,v=0;const S=()=>{p.uniforms.uTime.value=v,v+=.003,x=window.requestAnimationFrame(S),a.render(n,r)};return window.addEventListener("resize",_),S(),()=>{window.cancelAnimationFrame(x),window.removeEventListener("resize",_),d.dispose(),p.dispose(),a.dispose()}},[]),gl.jsx("canvas",{ref:o,className:"orb-canvas"})}function jM(){return gl.jsx("main",{className:"orb-only",children:gl.jsx(qM,{})})}F_.createRoot(document.getElementById("root")).render(gl.jsx(jM,{}));
+`;function qM(){const o=fp.useRef(null);return fp.useEffect(()=>{const e=o.current,n=new kM,r=new Xn(75,window.innerWidth/window.innerHeight,.1,1e3),a=new BM({canvas:e,antialias:!0});a.setSize(window.innerWidth,window.innerHeight);const u=new GM("#ffffff",.75);u.position.set(5,5,5);const f=new WM("#ffffff",.2);n.add(u,f);const d=new zf(.61,80),p=new ki({vertexShader:YM,fragmentShader:XM});p.uniforms.uTime={value:0};const m=new pi(d,p);n.add(m),r.position.z=3;const _=()=>{r.aspect=window.innerWidth/window.innerHeight,r.updateProjectionMatrix(),a.setSize(window.innerWidth,window.innerHeight)};let x,v=0;const S=()=>{p.uniforms.uTime.value=v,v+=.008,x=window.requestAnimationFrame(S),a.render(n,r)};return window.addEventListener("resize",_),S(),()=>{window.cancelAnimationFrame(x),window.removeEventListener("resize",_),d.dispose(),p.dispose(),a.dispose()}},[]),gl.jsx("canvas",{ref:o,className:"orb-canvas"})}function jM(){return gl.jsx("main",{className:"orb-only",children:gl.jsx(qM,{})})}F_.createRoot(document.getElementById("root")).render(gl.jsx(jM,{}));
