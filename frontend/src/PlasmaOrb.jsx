@@ -38,7 +38,8 @@ export default function PlasmaOrb() {
     let time = 0
     const animate = () => {
       material.uniforms.uTime.value = time
-      time += 0.008
+      shape.rotation.z -= 0.005
+      time += 0.002
       frameId = window.requestAnimationFrame(animate)
       renderer.render(scene, camera)
     }
