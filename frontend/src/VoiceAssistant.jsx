@@ -18,18 +18,25 @@ export default function VoiceAssistant() {
   const [reply, setReply] = useState('')
   const [error, setError] = useState('')
 
+  const speakGreeting = (greeting) => {
+    if (!greeting || !('speechSynthesis' in window)) return
+    const utterance = new SpeechSynthesisUtterance(greeting)
+    utterance.lang = 'en-GB'
+    utterance.voice = getDeepBritishVoice() || null
+    utterance.rate = 1
+    utterance.pitch = 0.35
+    utterance.volume = 1
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.resume()
+    window.speechSynthesis.speak(utterance)
+  }
+
   useEffect(() => {
     const socket = io(socketServerUrl)
     socketRef.current = socket
     socket.on('server:ready', ({ greeting }) => {
       if (!greeting || !('speechSynthesis' in window)) return
-      const utterance = new SpeechSynthesisUtterance(greeting)
-      utterance.lang = 'en-GB'
-      utterance.voice = getDeepBritishVoice() || null
-      utterance.rate = 1
-      utterance.pitch = 0.35
-      utterance.volume = 1
-      window.speechSynthesis.speak(utterance)
+      window.setTimeout(() => speakGreeting(greeting), 250)
     })
     socket.on('connect_error', () => setError('Unable to connect to the assistant server.'))
 
@@ -40,7 +47,7 @@ export default function VoiceAssistant() {
     }
   }, [])
 
-  const askGrok = async (text) => {
+  const askGrok = (text) => {
     setReply('Thinking…')
     const socket = socketRef.current
     if (!socket?.connected) {
