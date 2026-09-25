@@ -1,0 +1,11 @@
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+react-native/node_modules/
+react-native/.expo/
+react-native/andriod/
+
+backend/.env/
+.env/
+.env/
+youtube-node-base-organic-animation-threejs/
