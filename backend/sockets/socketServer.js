@@ -24,6 +24,7 @@ export function createSocketServer(httpServer) {
           endpointMode: 'chat',
           messages: payload.messages,
           responseMode: payload.responseMode,
+          onDelta: (delta) => socket.emit('ai:delta', { requestId: payload.requestId, delta }),
         })
         socket.emit('ai:response', result)
         acknowledge({ ok: true, result })

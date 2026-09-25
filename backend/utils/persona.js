@@ -100,5 +100,5 @@ Current response mode: ${mode.label}. Verbosity: ${mode.verbosity}. Wit: ${mode.
 Persona: ${JSON.stringify(persona)}
 Traits: ${JSON.stringify(traits)}
 Voice examples: ${JSON.stringify(voice)}
-Return a valid JSON object with a single "reply" string.`
+Return only the reply text, without a JSON wrapper.`
 }
