@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import * as Speech from 'expo-speech'
+import * as SecureStore from 'expo-secure-store'
 
 // On a physical phone, localhost points to the phone. Use the computer's LAN IP.
 const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'http://192.168.1.7:5000'
+const VISITOR_SESSION_KEY = 'jarvis_visitor_session'
 
 function selectDeepMaleVoice(voices) {
   const describe = (voice) => `${voice.name || ''} ${voice.identifier || ''}`
@@ -42,18 +44,38 @@ export default function useJarvisSocket() {
   }, [])
 
   useEffect(() => {
+    let disposed = false
     voiceReadyRef.current = Speech.getAvailableVoicesAsync().then((availableVoices) => {
       voiceRef.current = selectDeepMaleVoice(availableVoices)
     }).catch(() => {})
 
-    const socket = io(SOCKET_URL, { transports: ['websocket'] })
+    let timeZone = null
+    try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone } catch { /* Use a neutral greeting. */ }
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket'], autoConnect: false, auth: { timeZone },
+    })
     socketRef.current = socket
+    SecureStore.getItemAsync(VISITOR_SESSION_KEY).catch(() => null).then((visitorToken) => {
+      if (disposed) return
+      socket.auth = { ...socket.auth, visitorToken }
+      socket.connect()
+    })
+    socket.on('visitor:session', ({ visitorToken }) => {
+      if (!visitorToken) return
+      socket.auth = { ...socket.auth, visitorToken }
+      SecureStore.setItemAsync(VISITOR_SESSION_KEY, visitorToken).catch(() => {})
+    })
     socket.on('connect', () => { setConnected(true); setError('') })
     socket.on('disconnect', () => setConnected(false))
     socket.on('connect_error', (connectionError) => {
       setError(`Unable to connect to J.A.R.V.I.S. (${connectionError.message})`)
     })
-    socket.on('server:ready', ({ greeting: nextGreeting }) => {
+    socket.on('server:ready', ({ greeting: nextGreeting, error: greetingError }) => {
+      if (greetingError) {
+        setError(greetingError)
+        return
+      }
+      setError('')
       setGreeting(nextGreeting || '')
       speak(nextGreeting)
     })
@@ -64,6 +86,7 @@ export default function useJarvisSocket() {
     socket.on('ai:error', ({ error: message }) => setError(message || 'AI request failed.'))
 
     return () => {
+      disposed = true
       Speech.stop()
       socket.disconnect()
     }

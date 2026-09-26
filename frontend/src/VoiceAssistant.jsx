@@ -3,6 +3,15 @@ import { io } from 'socket.io-client'
 
 const socketServerUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
 const listeningSilenceTimeout = 80000
+const visitorStorageKey = 'jarvis-visitor-session'
+
+function savedVisitorToken() {
+  try {
+    return window.localStorage.getItem(visitorStorageKey)
+  } catch {
+    return null
+  }
+}
 
 function getPreferredVoice(voices = window.speechSynthesis.getVoices()) {
   return voices.find((voice) => /microsoft david/i.test(voice.name))
@@ -34,8 +43,6 @@ export default function VoiceAssistant() {
   const [transcript, setTranscript] = useState('')
   const [reply, setReply] = useState('')
   const [error, setError] = useState('')
-  const [voices, setVoices] = useState([])
-  const preferredVoice = getPreferredVoice(voices)
 
   const setSpeaking = (speaking) => {
     isSpeakingRef.current = speaking
@@ -120,7 +127,7 @@ export default function VoiceAssistant() {
     drainStreamSpeech()
   }
 
-  const speakText = (text, voice, resumeListening = true) => {
+  const speakText = (text) => {
     if (!text) return
     const synthesis = window.speechSynthesis
     if (!synthesis) {
@@ -128,7 +135,7 @@ export default function VoiceAssistant() {
       return
     }
 
-    const selectedVoice = voice || getPreferredVoice()
+    const selectedVoice = getPreferredVoice()
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = selectedVoice?.lang || 'en-US'
     utterance.voice = selectedVoice || null
@@ -137,11 +144,11 @@ export default function VoiceAssistant() {
     utterance.volume = 1
     utterance.onstart = () => {
       setSpeaking(true)
-      if (resumeListening) startListening(true, true)
+      startListening(true, true)
     }
     utterance.onend = () => {
       setSpeaking(false)
-      if (resumeListening && autoListenRef.current) {
+      if (autoListenRef.current) {
         scheduleAutoListening()
       }
     }
@@ -160,12 +167,6 @@ export default function VoiceAssistant() {
     } catch (error) {
       setError(`Voice playback failed: ${error.message}`)
     }
-  }
-
-  const playVoicePreview = (voice) => {
-    window.clearTimeout(greetingTimerRef.current)
-    pendingGreetingRef.current = null
-    speakText('Hello Sir. This is a voice preview.', voice, false)
   }
 
   const clearSilenceTimer = () => {
@@ -202,7 +203,6 @@ export default function VoiceAssistant() {
     }
     const updateVoices = () => {
       const availableVoices = synthesis.getVoices()
-      setVoices(availableVoices)
       if (availableVoices.length > 0) playPendingGreeting()
     }
     if (synthesis) {
@@ -210,10 +210,31 @@ export default function VoiceAssistant() {
       synthesis.addEventListener('voiceschanged', updateVoices)
     }
 
-    const socket = io(socketServerUrl)
+    const socket = io(socketServerUrl, {
+      auth: {
+        visitorToken: savedVisitorToken(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+    })
     socketRef.current = socket
-    socket.on('server:ready', ({ greeting }) => {
-      if (!greeting || !('speechSynthesis' in window)) return
+    socket.on('visitor:session', ({ visitorToken }) => {
+      if (!visitorToken) return
+      socket.auth = { ...socket.auth, visitorToken }
+      try {
+        window.localStorage.setItem(visitorStorageKey, visitorToken)
+      } catch {
+        // The current connection can still use the session when storage is disabled.
+      }
+    })
+    socket.on('server:ready', ({ greeting, error: greetingError }) => {
+      if (greetingError) {
+        setError(greetingError)
+        return
+      }
+      if (!greeting) return
+      setError('')
+      setReply(greeting)
+      if (!('speechSynthesis' in window)) return
       pendingGreetingRef.current = greeting
       window.clearTimeout(greetingTimerRef.current)
       greetingTimerRef.current = window.setTimeout(playPendingGreeting, synthesis.getVoices().length > 0 ? 250 : 2000)
@@ -361,29 +382,19 @@ export default function VoiceAssistant() {
 
   return (
     <section className="voice-assistant" aria-live="polite">
-      <button className={`mic-button ${isListening ? 'is-listening' : ''}`} onClick={() => isListening ? stopListening(true) : startListening(false)} aria-label="Speak to Grok">
-        <span className="mic-icon" />
+      {(transcript || reply || error) && (
+        <div className="voice-messages">
+          {transcript && <p className="transcript">“{transcript}”</p>}
+          {reply && <p className="grok-reply">{reply}</p>}
+          {error && <p className="voice-error">{error}</p>}
+        </div>
+      )}
+      <button className={`sound-button ${isListening ? 'is-listening' : ''}`} onClick={() => isListening ? stopListening(true) : startListening(false)} aria-label={isListening ? 'Stop listening' : 'Speak to JARVIS'}>
+        <span className="sound-waves" aria-hidden="true">
+          <span /><span /><span /><span /><span />
+        </span>
       </button>
       <p className="voice-status">{isListening ? 'Listening…' : 'Tap to speak'}</p>
-      {'speechSynthesis' in window ? (
-        <details className="tts-voices">
-          <summary onClick={() => playVoicePreview(getPreferredVoice())}>TTS voices available: {voices.length} · click to hear</summary>
-          <p className="tts-default">Default voice: {preferredVoice?.name || 'Browser default'}</p>
-          {voices.length > 0 ? (
-            <ul>
-              {voices.map((voice, index) => (
-                <li key={`${voice.voiceURI}-${index}`}>
-                  <span>{voice.name} ({voice.lang}){voice === preferredVoice ? ' — app default' : voice.default ? ' — system default' : ''}</span>
-                  <button type="button" onClick={() => playVoicePreview(voice)} aria-label={`Play ${voice.name} voice sample`}>Play</button>
-                </li>
-              ))}
-            </ul>
-          ) : <p>No voices reported by this browser yet.</p>}
-        </details>
-      ) : <p className="voice-status">TTS is unavailable in this browser.</p>}
-      {transcript && <p className="transcript">“{transcript}”</p>}
-      {reply && <p className="grok-reply">{reply}</p>}
-      {error && <p className="voice-error">{error}</p>}
     </section>
   )
 }

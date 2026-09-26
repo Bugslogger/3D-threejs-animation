@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { buildPersonaPrompt, currentMode, models, modes } from '../utils/persona.js'
+import { buildPersonaPrompt, currentMode, models, modes } from '../utils/jarvis.config.js'
 
 function requestError(message, status = 400) {
   const error = new Error(message)

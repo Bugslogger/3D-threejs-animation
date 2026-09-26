@@ -22,8 +22,16 @@ export default function PlasmaOrb() {
 
     // Detail 6 gives the shader enough vertices without overwhelming the GPU.
     const geometry = new THREE.IcosahedronGeometry(0.61, 50)
-    const material = new THREE.ShaderMaterial({ vertexShader, fragmentShader })
-    material.uniforms.uTime = { value: 0 }
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        uTime: { value: 0 },
+        uColorBottom: { value: new THREE.Color('#064d40') },
+        uColorMiddle: { value: new THREE.Color('#18d878') },
+        uColorTop: { value: new THREE.Color('#b5ff45') },
+      },
+    })
     const shape = new THREE.Mesh(geometry, material)
     scene.add(shape)
 

@@ -6,6 +6,7 @@ react-native/.expo/
 react-native/andriod/
 
 backend/.env/
+backend/.visitor-secret
 .env/
 .env/
 youtube-node-base-organic-animation-threejs/

@@ -5,21 +5,14 @@ import express from "express";
 import aiRoutes from "./routes/aiRoutes.js";
 import healthRoutes from "./routes/healthRoutes.js";
 import { createSocketServer } from "./sockets/socketServer.js";
+import { aiConfig, getServerSettings } from "./utils/ai.config.js";
 
 // Trust certificates installed in the Windows system store (for example, a
 // corporate HTTPS proxy) without disabling TLS verification.
-process.env.NODE_USE_SYSTEM_CA ||= "1";
+process.env.NODE_USE_SYSTEM_CA ||= aiConfig.server.useSystemCAByDefault ? "1" : "0";
 
 const app = express();
-const port = Number(process.env.PORT) || 5000;
-const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
-const allowedOrigins = [
-  clientOrigin,
-  "exp://192.168.1.7:8081",
-  "exp://192.168.1.7:8082",
-  "http://192.168.1.7:8081",
-  "http://192.168.1.7:8082",
-];
+const { port, allowedOrigins } = getServerSettings();
 const httpServer = createServer(app);
 const io = createSocketServer(httpServer, allowedOrigins);
 
