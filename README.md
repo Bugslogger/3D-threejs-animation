@@ -29,7 +29,7 @@ HOTEL_PROVIDER_API_KEY=your_server_side_provider_key
 Then start the backend:
 
 ```powershell
-node --use-system-ca server.js
+npm start
 ```
 
 **Backend with Docker**
