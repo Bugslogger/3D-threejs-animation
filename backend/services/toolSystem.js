@@ -1,4 +1,5 @@
 import { aiConfig } from '../utils/ai.config.js'
+import { digimenuTools } from '../integrations/digimenu/tools.js'
 
 function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -71,6 +72,8 @@ const tools = new Map([
   }],
 ])
 
+for (const [name, tool] of digimenuTools) tools.set(name, tool)
+
 export function listTools() {
   return [...tools.entries()].map(([name, tool]) => ({
     name,
@@ -87,7 +90,9 @@ export function authorizeToolCall(call, grants = []) {
   }
   const tool = tools.get(call.name)
   if (!tool) return { status: 'unavailable', reason: `Tool ${call.name} is not registered.` }
-  const args = tool.validate(call.arguments)
+  // Tools whose parameters are all optional may be called without an
+  // arguments object by the model. Treat null/undefined as an empty object.
+  const args = tool.validate(call.arguments ?? {})
   if (!args) return { status: 'invalid', reason: `Invalid arguments for ${call.name}.` }
   if (tool.kind !== 'read') {
     const allowed = grants.some((grant) => grant?.tool === call.name && Date.parse(grant.expiresAt) > Date.now())

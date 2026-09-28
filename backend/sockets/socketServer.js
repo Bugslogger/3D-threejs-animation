@@ -6,7 +6,7 @@ import { createHotelProvider, hotelProviderConfigured } from '../services/hotelP
 import { listTools } from '../services/toolSystem.js'
 import { localGreetingPeriod, resolveVisitorSession } from '../services/visitorSession.js'
 import { aiConfig, getControlToken, getServerSettings } from '../utils/ai.config.js'
-import { currentMode } from '../utils/jarvis.config.js'
+import { currentMode } from '../utils/friday.config.js'
 
 function controlTokenMatches(value) {
   const expected = getControlToken()

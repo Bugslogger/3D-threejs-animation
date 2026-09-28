@@ -9,7 +9,7 @@ export const models = {
   chat: "grok-4.7",
 
   // Fast personality / affect / conversational rendering
-  affect: "grok-4-1-fast",
+  affect: "grok-4.7",
 };
 
 

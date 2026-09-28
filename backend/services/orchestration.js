@@ -1,4 +1,4 @@
-import { autonomy, sosPolicy } from '../utils/jarvis.config.js'
+import { autonomy, sosPolicy } from '../utils/friday.config.js'
 import { authorizeToolCall, executeTool, listTools } from './toolSystem.js'
 
 // Perception records only information the app actually received.

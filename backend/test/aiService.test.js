@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { after, before, test } from 'node:test'
 import { generateGreeting, runAiPipeline, preservesContent } from '../services/aiService.js'
-import { resolveResponseMode } from '../utils/jarvis.config.js'
+import { resolveResponseMode } from '../utils/friday.config.js'
 import { capabilityState, checkAuthority, executeAndVerify, modelIntentAndSituation, perceive } from '../services/orchestration.js'
 import { authorizeToolCall, executeTool, listTools } from '../services/toolSystem.js'
 
@@ -53,7 +53,7 @@ test('perception lists real tools without claiming external observations or acti
   const state = modelIntentAndSituation(perception)
   assert.equal(state.intent.literalRequest, 'Take me to the airport')
   assert.equal(state.situation.externalDataAvailable, false)
-  assert.deepEqual(perception.availableTools.map((tool) => tool.name), ['get_current_time', 'convert_temperature'])
+  assert.deepEqual(perception.availableTools.map((tool) => tool.name), ['get_current_time', 'convert_temperature', 'get_digimenu_menu'])
   assert.equal(capabilityState().configuredAutonomyLevel, 3)
   assert.equal(capabilityState().effectiveExternalActionLevel, 0)
   assert.equal(capabilityState().sosConfigured, true)
@@ -70,9 +70,9 @@ test('pipeline falls back to reasoning draft when affect changes a fact', async 
   })
   assert.equal(result.data.reply, 'Route B takes 25 minutes.')
   assert.deepEqual(deltas, ['Route B takes 25 minutes.'])
-  assert.deepEqual(requestedModels, ['grok-4.7', 'grok-4-1-fast'])
+  assert.deepEqual(requestedModels, ['grok-4.7', 'grok-4.7'])
   assert.equal(requestedBodies.at(-2).text.format.type, 'json_schema')
-  assert.deepEqual(requestedBodies.at(-2).text.format.schema.required, ['reply', 'proposedAction', 'toolCall'])
+  assert.deepEqual(requestedBodies.at(-2).text.format.schema.required, ['speech', 'performance', 'proposedAction', 'toolCall'])
   assert.equal(requestedBodies.at(-1).text, undefined)
   assert.deepEqual(result.authority.executedActions, [])
 })
@@ -97,7 +97,7 @@ test('greeting comes from the personality model and avoids recent text', async (
     timeOfDay: 'morning',
   })
   assert.equal(greeting, 'Good morning, Sir. What can I help you with?')
-  assert.deepEqual(requestedModels, ['grok-4-1-fast'])
+  assert.deepEqual(requestedModels, ['grok-4.7'])
   assert.equal(requestedBodies.at(-1).max_output_tokens, 96)
   assert.match(requestedBodies.at(-1).input[1].content, /What are we solving today/)
   assert.match(requestedBodies.at(-1).input[1].content, /returning-visitor session/)
@@ -109,7 +109,7 @@ test('greeting retries a salutation for the wrong local time', async () => {
   requestedModels.length = 0
   const greeting = await generateGreeting({ timeOfDay: 'evening', isReturning: true })
   assert.equal(greeting, 'Good evening, Sir. What shall we build?')
-  assert.deepEqual(requestedModels, ['grok-4-1-fast', 'grok-4-1-fast'])
+  assert.deepEqual(requestedModels, ['grok-4.7', 'grok-4.7'])
 })
 
 test('authority gate rejects unavailable actions and tool layer verifies none', async () => {
@@ -149,7 +149,7 @@ test('tool gate rejects invalid arguments and unknown tools', async () => {
   const outcome = await executeTool(decision)
   assert.equal(outcome.verified, true)
   assert.equal(outcome.result.value, 212)
-  assert.equal(listTools().length, 2)
+  assert.equal(listTools().length, 3)
 })
 
 test('hotel booking uses executor state without consulting either model', async () => {

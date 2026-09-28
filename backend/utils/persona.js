@@ -1,6 +1,6 @@
 export const models = {
   chat: "grok-4.7",
-  affect: "grok-4-1-fast",
+  affect: "grok-4.7",
 };
 
 export const persona = {

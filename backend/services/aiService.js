@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import { aiConfig, getXaiSettings } from '../utils/ai.config.js'
-import { compileAffectSystem, compileChatSystem, currentMode, models, modes, persona, resolveResponseMode, traits, voice } from '../utils/odus.config.js'
+import { compileAffectSystem, compileChatSystem, currentMode, models, modes, persona as fridayPersona, resolveResponseMode, traits, voice } from '../utils/friday.config.js'
+import { defaultSpeechPerformance, speechDirectorInstruction, speechPerformanceSchema } from '../utils/speechDirector.config.js'
 import { capabilityState, checkAuthority, executeAndVerify, modelIntentAndSituation, perceive, reportOutcome } from './orchestration.js'
 import { detectHotelBookingIntent, executeHotelBooking } from './hotelBookingExecutor.js'
 
@@ -11,7 +12,8 @@ const decisionFormat = {
   schema: {
     type: 'object',
     properties: {
-      reply: { type: 'string' },
+      speech: { type: 'string' },
+      performance: speechPerformanceSchema,
       proposedAction: { type: ['string', 'null'] },
       toolCall: {
         anyOf: [
@@ -28,7 +30,7 @@ const decisionFormat = {
         ],
       },
     },
-    required: ['reply', 'proposedAction', 'toolCall'],
+    required: ['speech', 'performance', 'proposedAction', 'toolCall'],
     additionalProperties: false,
   },
 }
@@ -77,10 +79,10 @@ export async function generateGreeting({ recentGreetings = [], timeOfDay = null,
   if (!apiKey) throw requestError('XAI_API_KEY is not configured on the server.', 500)
   const client = new OpenAI({ apiKey, baseURL, timeout: aiConfig.greeting.timeoutMs, maxRetries: aiConfig.greeting.maxRetries })
   const recent = recentGreetings.slice(-aiConfig.greeting.recentCount)
-  const system = `You are ${persona.name}, a ${persona.identity.voice} AI assistant. Write a warm, natural spoken greeting in ${persona.locale} English, like a thoughtful friend. Address the user as ${persona.addressUserAs}. Keep it to one or two short sentences, at most 30 words. Invite them to speak. Never claim to have seen them, remember personal details, or completed an action. Return only the greeting text, without quotes or formatting.`
+  const system = `You are ${fridayPersona.name}, a ${fridayPersona.role}. ${fridayPersona.personality?.style || fridayPersona.identity?.voice || ''} Write a warm, natural spoken greeting in ${fridayPersona.locale} English. Address the user as ${fridayPersona.addressUserAs}. Keep it to one or two short sentences, at most 30 words. Invite them to speak. Never claim to have seen them, remember personal details, or completed an action. Return only the greeting text, without quotes or formatting.`
   const visitContext = isReturning
     ? 'This device has a valid returning-visitor session. You may say welcome back and ask how they are or what they would like to build today.'
-    : `This is the first validated visit from this device. Introduce yourself as ${persona.name}; do not say welcome back.`
+    : `This is the first validated visit from this device. Introduce yourself as ${fridayPersona.name}; do not say welcome back.`
   const timeContext = timeOfDay
     ? `The user's local time is ${timeOfDay}. Begin with an appropriate time-of-day salutation. At night, use a welcoming late-evening phrase rather than a "good night" farewell.`
     : 'The user’s local time is unknown. Use a neutral salutation.'
@@ -128,7 +130,8 @@ function parseReasoning(text) {
   } catch {
     throw requestError('The reasoning model returned an invalid decision format.', 502)
   }
-  if (!result || typeof result.reply !== 'string' || !result.reply.trim()
+  const speech = typeof result?.speech === 'string' ? result.speech : result?.reply
+  if (!result || typeof speech !== 'string' || !speech.trim()
     || !Object.hasOwn(result, 'proposedAction')
     || !Object.hasOwn(result, 'toolCall')
     || (result.proposedAction !== null && typeof result.proposedAction !== 'string')
@@ -137,7 +140,9 @@ function parseReasoning(text) {
     throw requestError('The reasoning model returned an incomplete decision.', 502)
   }
   return {
-    reply: result.reply.trim(),
+    reply: speech.trim(),
+    speech: speech.trim(),
+    performance: result.performance || defaultSpeechPerformance,
     proposedAction: result.proposedAction?.trim().replace(/\s+/g, ' ').slice(0, 80) || null,
     toolCall: result.toolCall,
   }
@@ -167,7 +172,7 @@ export async function runAiPipeline({ endpointMode = 'chat', messages, responseM
     return {
       models: [],
       responseMode: selectedMode,
-      data: { reply: booking.report },
+      data: { reply: booking.report, speech: booking.report, performance: defaultSpeechPerformance },
       authority: {
         ...capabilityState(),
         decision: { status: booking.status, action: 'book_hotel', checkIn: booking.checkIn },
@@ -190,10 +195,13 @@ export async function runAiPipeline({ endpointMode = 'chat', messages, responseM
     model: models.chat,
     format: decisionFormat,
     input: [
-      { role: 'system', content: `${compileChatSystem(persona, modes[selectedMode])}
+      { role: 'system', content: `${compileChatSystem(fridayPersona, modes[selectedMode])}
+FRIDAY PERSONA: ${JSON.stringify(fridayPersona)}
+${speechDirectorInstruction}
 RUNTIME TOOLS: ${JSON.stringify(perception.availableTools)}
-Use a registered toolCall for live time or temperature conversion. Do not guess a tool result.
-No external action tools, sensors, or emergency contacts are connected. The configured autonomy level is not a grant.
+Use a registered toolCall for live time, temperature conversion, or Digimenu menu lookup. Do not guess a tool result.
+Digimenu menu lookup is read-only and returns live menu details and prices when configured.
+No external write actions, sensors, or emergency contacts are connected. The configured autonomy level is not a grant.
 Never claim an external action occurred without a verified tool result.` },
       ...perception.conversation.slice(0, -1),
       { role: 'user', content: `Current request and observed context:\n${JSON.stringify(intentAndSituation)}\n\nUser's latest message:\n${perception.latestUserMessage}` },
@@ -203,6 +211,7 @@ Never claim an external action occurred without a verified tool result.` },
   const authority = checkAuthority(decision.proposedAction, decision.toolCall, grants)
   const toolResults = await executeAndVerify(authority)
   let reply = reportOutcome(decision.reply, authority, toolResults)
+  const performance = decision.performance
   const usedModels = [models.chat]
   const usage = [reasoning.usage]
 
@@ -215,7 +224,7 @@ Never claim an external action occurred without a verified tool result.` },
         client,
         model: models.affect,
         input: [
-          { role: 'system', content: compileAffectSystem(persona, traits, voice, modes[selectedMode]) },
+          { role: 'system', content: compileAffectSystem(fridayPersona, traits, voice, modes[selectedMode]) },
           { role: 'user', content: reply },
         ],
       })
@@ -231,7 +240,7 @@ Never claim an external action occurred without a verified tool result.` },
   return {
     models: usedModels,
     responseMode: selectedMode,
-    data: { reply },
+    data: { reply, speech: reply, performance },
     authority: { ...capabilityState(), decision: authority, ...toolResults },
     usage,
   }
