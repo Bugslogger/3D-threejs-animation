@@ -10,8 +10,6 @@ const paceToSpeed = Object.freeze({
 })
 
 function voiceSettings(performance = {}) {
-  // The speech director may omit performance or explicitly return null.
-  // Normalize both cases before reading delivery settings.
   const safePerformance = performance && typeof performance === 'object' ? performance : {}
   const energy = safePerformance.energy || 'medium'
   const emotion = safePerformance.emotion || 'neutral'
@@ -24,9 +22,9 @@ function voiceSettings(performance = {}) {
   }
 }
 
-export function createElevenLabsClient({ fetchImpl = fetch, config = getElevenLabsConfig() } = {}) {
+export function createElevenLabsProvider({ fetchImpl = fetch, config = getElevenLabsConfig() } = {}) {
   return {
-    async streamSpeech({ speech, performance } = {}) {
+    async stream({ speech, performance } = {}) {
       if (!config.apiKey) throw new Error('ELEVENLABS_API_KEY is not configured.')
       if (!config.voiceId) throw new Error('ELEVENLABS_VOICE_ID is not configured.')
       if (typeof speech !== 'string' || !speech.trim()) throw new Error('Speech text is required.')

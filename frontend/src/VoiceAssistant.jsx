@@ -3,10 +3,8 @@ import { io } from 'socket.io-client'
 import config from './config'
 
 const socketServerUrl = config.socketServerUrl
-const ttsUrl = config.ttsUrl
 const listeningSilenceTimeout = 80000
 const visitorStorageKey = 'jarvis-visitor-session'
-const audioReadyStorageKey = 'jarvis-audio-ready'
 
 function isMobileBrowser() {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
@@ -24,7 +22,7 @@ export default function VoiceAssistant() {
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
   const audioUrlRef = useRef(null)
-  const audioAbortRef = useRef(null)
+  const audioStreamRef = useRef(null)
   const socketRef = useRef(null)
   const activeRequestRef = useRef(null)
   const requestCounterRef = useRef(0)
@@ -33,14 +31,10 @@ export default function VoiceAssistant() {
   const isListeningRef = useRef(false)
   const isSpeakingRef = useRef(false)
   const userInteractedRef = useRef(false)
-  const transcriptUpdateTimerRef = useRef(null)
-  const transcriptRef = useRef('')
   const autoListenRef = useRef(true)
   const lastConnectionAnnouncementRef = useRef('')
   const lastSubmittedTranscriptRef = useRef('')
   const [isListening, setIsListening] = useState(false)
-  const [transcript, setTranscript] = useState('')
-  const [reply, setReply] = useState('')
   const [error, setError] = useState('')
 
   const setSpeaking = (speaking) => {
@@ -67,19 +61,11 @@ export default function VoiceAssistant() {
     }, 250)
   }
 
-  const canAutoplayAudio = () => {
-    try {
-      return window.localStorage.getItem(audioReadyStorageKey) === 'true'
-    } catch {
-      return false
-    }
-  }
-
   const stopAudio = () => {
-    audioAbortRef.current?.abort()
-    audioAbortRef.current = null
+    audioStreamRef.current = null
     if (audioRef.current) {
       audioRef.current.pause()
+      audioRef.current.src = ''
       audioRef.current.onended = null
       audioRef.current.onerror = null
       audioRef.current = null
@@ -90,121 +76,91 @@ export default function VoiceAssistant() {
     }
   }
 
-  const speakText = async (text, performance = null) => {
-    if (!text || (!userInteractedRef.current && !canAutoplayAudio())) return
-    stopListening(false)
+  const startSocketAudio = (requestId, contentType = 'audio/mpeg') => {
     stopAudio()
-    const abortController = new AbortController()
-    audioAbortRef.current = abortController
-    try {
-      setError('')
-      const response = await fetch(ttsUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ speech: text, performance }),
-        signal: abortController.signal,
-      })
-      if (!response.ok) {
-        const result = await response.json().catch(() => ({}))
-        throw new Error(result.error || `TTS request failed with HTTP ${response.status}.`)
-      }
+    const stream = {
+      requestId,
+      contentType,
+      chunks: [],
+      queue: [],
+      sourceBuffer: null,
+      mediaSource: null,
+      ended: false,
+      started: false,
+    }
+    audioStreamRef.current = stream
+    setError('')
 
-      // The backend proxies ElevenLabs' streaming response. Use MediaSource
-      // where available so playback begins with the first audio chunks instead
-      // of waiting for the entire MP3 to download.
-      const canStream = response.body
-        && 'MediaSource' in window
-        && MediaSource.isTypeSupported('audio/mpeg')
+    const audio = new Audio()
+    audioRef.current = audio
+    audio.onplay = () => setSpeaking(true)
+    audio.onended = () => {
+      setSpeaking(false)
+      stopAudio()
+      if (autoListenRef.current) scheduleAutoListening()
+    }
+    audio.onerror = () => {
+      setSpeaking(false)
+      stopAudio()
+      setError('Voice playback failed.')
+    }
 
-      if (!canStream) {
-        const audioUrl = URL.createObjectURL(await response.blob())
-        audioUrlRef.current = audioUrl
-        const audio = new Audio(audioUrl)
-        audioRef.current = audio
-        audio.onplay = () => setSpeaking(true)
-        audio.onended = () => {
-          setSpeaking(false)
-          stopAudio()
-          if (autoListenRef.current) scheduleAutoListening()
-        }
-        audio.onerror = () => {
-          setSpeaking(false)
-          stopAudio()
-          setError('Voice playback failed.')
-        }
-        await audio.play()
-        return
-      }
+    if (!('MediaSource' in window) || !MediaSource.isTypeSupported(contentType)) return
 
-      const mediaSource = new MediaSource()
-      const audioUrl = URL.createObjectURL(mediaSource)
-      audioUrlRef.current = audioUrl
-      const audio = new Audio(audioUrl)
-      audioRef.current = audio
-      audio.onplay = () => setSpeaking(true)
-      audio.onended = () => {
-        setSpeaking(false)
-        stopAudio()
-        if (autoListenRef.current) scheduleAutoListening()
-      }
-      audio.onerror = () => {
-        setSpeaking(false)
-        stopAudio()
+    const mediaSource = new MediaSource()
+    stream.mediaSource = mediaSource
+    audioUrlRef.current = URL.createObjectURL(mediaSource)
+    audio.src = audioUrlRef.current
+    mediaSource.addEventListener('sourceopen', () => {
+      if (audioStreamRef.current !== stream) return
+      try {
+        stream.sourceBuffer = mediaSource.addSourceBuffer(contentType)
+        stream.sourceBuffer.addEventListener('updateend', () => {
+          if (!stream.started) {
+            stream.started = true
+            audio.play().catch(() => setError('Voice playback failed.'))
+          }
+          appendSocketAudio(stream)
+        })
+        appendSocketAudio(stream)
+      } catch {
         setError('Voice playback failed.')
       }
+    }, { once: true })
+  }
 
-      await new Promise((resolve, reject) => {
-        let sourceBuffer
-        let ended = false
-        let started = false
-        const chunks = []
-
-        const appendNext = () => {
-          if (!sourceBuffer || sourceBuffer.updating || chunks.length === 0) {
-            if (ended && sourceBuffer && !sourceBuffer.updating && chunks.length === 0 && mediaSource.readyState === 'open') {
-              mediaSource.endOfStream()
-            }
-            return
-          }
-          sourceBuffer.appendBuffer(chunks.shift())
-        }
-
-        const readStream = async () => {
-          try {
-            const reader = response.body.getReader()
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              if (value?.byteLength) chunks.push(value)
-              appendNext()
-            }
-            ended = true
-            appendNext()
-          } catch (error) {
-            if (error.name !== 'AbortError') reject(error)
-          }
-        }
-
-        mediaSource.addEventListener('sourceopen', () => {
-          try {
-            sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg')
-            sourceBuffer.addEventListener('updateend', () => {
-              if (!started && audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
-                started = true
-                audio.play().then(resolve).catch(reject)
-              }
-              appendNext()
-            })
-            void readStream()
-          } catch (error) {
-            reject(error)
-          }
-        }, { once: true })
-      })
-    } catch (error) {
-      setSpeaking(false)
-      if (error.name !== 'AbortError') setError(error.message || 'Voice playback failed.')
+  const appendSocketAudio = (stream) => {
+    const { sourceBuffer, mediaSource } = stream
+    if (!sourceBuffer || sourceBuffer.updating || stream.queue.length === 0) {
+      if (stream.ended && sourceBuffer && !sourceBuffer.updating && stream.queue.length === 0 && mediaSource.readyState === 'open') {
+        mediaSource.endOfStream()
+      }
+      return
     }
+    sourceBuffer.appendBuffer(stream.queue.shift())
+  }
+
+  const receiveSocketAudio = (requestId, chunk) => {
+    const stream = audioStreamRef.current
+    if (!stream || stream.requestId !== requestId || !chunk) return
+    const bytes = chunk instanceof ArrayBuffer ? new Uint8Array(chunk) : new Uint8Array(chunk.buffer || chunk)
+    stream.chunks.push(bytes)
+    stream.queue.push(bytes)
+    appendSocketAudio(stream)
+  }
+
+  const finishSocketAudio = (requestId) => {
+    const stream = audioStreamRef.current
+    if (!stream || stream.requestId !== requestId) return
+    stream.ended = true
+    if (!stream.mediaSource) {
+      const audioUrl = URL.createObjectURL(new Blob(stream.chunks, { type: stream.contentType }))
+      audioUrlRef.current = audioUrl
+      audioRef.current.src = audioUrl
+      audioRef.current.play().catch(() => setError('Voice playback failed.'))
+      return
+    }
+    appendSocketAudio(stream)
   }
 
   const clearSilenceTimer = () => {
@@ -247,16 +203,9 @@ export default function VoiceAssistant() {
         // The current connection can still use the session when storage is disabled.
       }
     })
-    socket.on('server:ready', ({ greeting, error: greetingError }) => {
+    socket.on('server:ready', ({ error: greetingError }) => {
       if (greetingError) {
         setError(greetingError)
-        return
-      }
-      if (!greeting) return
-      setError('')
-      setReply(greeting)
-      if (canAutoplayAudio()) {
-        window.setTimeout(() => speakText(greeting), 250)
       }
     })
     socket.on('connect', () => {
@@ -267,19 +216,26 @@ export default function VoiceAssistant() {
       setError(message)
       if (lastConnectionAnnouncementRef.current !== message) {
         lastConnectionAnnouncementRef.current = message
-        speakText(message)
       }
     })
-    socket.on('ai:delta', ({ requestId, delta }) => {
-      if (requestId !== activeRequestRef.current || typeof delta !== 'string') return
-      setReply((current) => current.startsWith('Thinking') ? delta : current + delta)
+    socket.on('tts:start', ({ requestId, contentType }) => {
+      startSocketAudio(requestId, contentType)
+    })
+    socket.on('tts:chunk', ({ requestId, chunk }) => {
+      receiveSocketAudio(requestId, chunk)
+    })
+    socket.on('tts:end', ({ requestId }) => {
+      finishSocketAudio(requestId)
+    })
+    socket.on('tts:error', ({ requestId, error: ttsError }) => {
+      if (audioStreamRef.current?.requestId === requestId) stopAudio()
+      setError(ttsError || 'Voice playback failed.')
     })
 
     return () => {
       clearSilenceTimer()
       window.clearTimeout(autoListenTimerRef.current)
       recognitionRef.current?.abort()
-      window.clearTimeout(transcriptUpdateTimerRef.current)
       stopAudio()
       setSpeaking(false)
       socket.disconnect()
@@ -299,10 +255,8 @@ export default function VoiceAssistant() {
     stopAudio()
     const requestId = ++requestCounterRef.current
     activeRequestRef.current = requestId
-    setReply('Thinking…')
     const socket = socketRef.current
     if (!socket?.connected) {
-      setReply('')
       setError('Assistant server is not connected.')
       return
     }
@@ -314,19 +268,13 @@ export default function VoiceAssistant() {
     }, (timeoutError, result) => {
       activeRequestRef.current = null
       if (timeoutError) {
-        setReply('')
         setError('The assistant request timed out.')
         return
       }
       if (!result?.ok) {
-        setReply('')
         setError(result?.error || 'Grok request failed.')
         return
       }
-      const data = result.result.data
-      const answer = typeof data === 'string' ? data : data.speech || data.reply || JSON.stringify(data)
-      setReply(answer)
-      void speakText(answer, typeof data === 'string' ? null : data.performance)
     })
   }
 
@@ -341,11 +289,7 @@ export default function VoiceAssistant() {
 
     autoListenRef.current = true
     setError('')
-    transcriptRef.current = ''
     lastSubmittedTranscriptRef.current = ''
-    window.clearTimeout(transcriptUpdateTimerRef.current)
-    setTranscript('')
-    setReply('')
     if (!interruptionMode) {
       stopAudio()
       setSpeaking(false)
@@ -364,15 +308,6 @@ export default function VoiceAssistant() {
       armSilenceTimer(recognition)
       const latestResult = event.results[event.results.length - 1]
       const text = latestResult?.[0]?.transcript?.trim() || ''
-      transcriptRef.current = text
-      // Interim speech events can fire many times per second. Batch them so
-      // recognition stays responsive without re-rendering the whole UI each time.
-      if (!transcriptUpdateTimerRef.current) {
-        transcriptUpdateTimerRef.current = window.setTimeout(() => {
-          setTranscript(transcriptRef.current)
-          transcriptUpdateTimerRef.current = null
-        }, 50)
-      }
       if (isSpeakingRef.current && text.trim()) {
         // User interruption: stop Jarvis immediately and keep this recognition
         // session alive until the user's sentence is final.
@@ -410,7 +345,6 @@ export default function VoiceAssistant() {
   const handleVoiceButtonClick = () => {
     userInteractedRef.current = true
     try {
-      window.localStorage.setItem(audioReadyStorageKey, 'true')
     } catch {
       // Voice remains enabled for this page session when storage is unavailable.
     }
@@ -423,10 +357,8 @@ export default function VoiceAssistant() {
 
   return (
     <section className="voice-assistant" aria-live="polite">
-      {(transcript || reply || error) && (
+      {error && (
         <div className="voice-messages">
-          {transcript && <p className="transcript">“{transcript}”</p>}
-          {reply && <p className="grok-reply">{reply}</p>}
           {error && <p className="voice-error">{error}</p>}
         </div>
       )}

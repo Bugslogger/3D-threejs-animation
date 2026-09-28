@@ -1,8 +1,6 @@
 const defaultConfig = Object.freeze({
   baseURL: 'https://api.elevenlabs.io',
   modelId: 'eleven_flash_v2_5',
-  // Smaller speech audio reaches the browser sooner and is sufficient for
-  // conversational playback.
   outputFormat: 'mp3_22050_32',
   timeoutMs: 30_000,
 })

@@ -14,9 +14,7 @@ html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; back
 .sound-button.is-listening .sound-waves span:nth-child(2), .sound-button.is-listening .sound-waves span:nth-child(4) { animation-delay: 140ms; }
 .sound-button.is-listening .sound-waves span:nth-child(3) { animation-delay: 280ms; }
 .voice-status { flex: none; margin: 9px 0 0; color: #a5b9aa; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-.transcript, .grok-reply, .voice-error { margin: 0 0 8px; padding: 9px 12px; border: 1px solid rgba(126, 255, 154, .22); border-radius: 8px; background: rgba(0, 0, 0, .62); text-align: left; }
-.grok-reply { white-space: pre-wrap; color: #e2ffe9; }
-.voice-error { color: #ff9797; border-color: rgba(255, 90, 90, .35); }
+.voice-error { margin: 0 0 8px; padding: 9px 12px; border: 1px solid rgba(255, 90, 90, .35); border-radius: 8px; background: rgba(0, 0, 0, .62); color: #ff9797; text-align: left; }
 @keyframes soundPulse { 50% { transform: scale(1.12); box-shadow: 0 0 32px rgba(57, 255, 97, .72); } }
 @keyframes soundWave { to { transform: scaleY(.35); } }
 @media (prefers-reduced-motion: reduce) { .sound-button.is-listening, .sound-button.is-listening .sound-waves span { animation: none; } }

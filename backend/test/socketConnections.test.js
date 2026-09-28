@@ -136,7 +136,7 @@ test('browser tool connection unlocks, delegates, books, verifies, and revokes',
       messages: [{ role: 'user', content: 'Book me the usual hotel for next Friday.' }],
     })
     assert.equal(booked.result.authority.decision.status, 'verified')
-    assert.match(booked.result.data.reply, /Confirmation: booking-1/)
+    assert.equal(booked.result.data, undefined)
     assert.deepEqual(providerCalls.map((call) => call.path), [
       '/api/health', '/api/quotes', '/api/bookings', '/api/bookings/booking-1',
     ])
@@ -148,6 +148,7 @@ test('browser tool connection unlocks, delegates, books, verifies, and revokes',
       messages: [{ role: 'user', content: 'Book me the usual hotel for next Friday.' }],
     })
     assert.equal(afterRevoke.result.authority.decision.status, 'needs_profile')
+    assert.equal(afterRevoke.result.data, undefined)
   } finally {
     client.disconnect()
     await new Promise((resolve) => ioServer.close(resolve))

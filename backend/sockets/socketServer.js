@@ -5,6 +5,7 @@ import { createHotelDelegation } from '../services/hotelDelegation.js'
 import { createHotelProvider, hotelProviderConfigured } from '../services/hotelProvider.js'
 import { listTools } from '../services/toolSystem.js'
 import { localGreetingPeriod, resolveVisitorSession } from '../services/visitorSession.js'
+import { createTtsService } from '../layers/tts/ttsService.js'
 import { aiConfig, getControlToken, getServerSettings } from '../utils/ai.config.js'
 import { currentMode } from '../utils/friday.config.js'
 
@@ -34,6 +35,7 @@ function toolStatus(session) {
 
 export function createSocketServer(httpServer, allowedOrigins = getServerSettings().allowedOrigins, { greetingGenerator = generateGreeting } = {}) {
   const sessions = new Map()
+  const ttsService = createTtsService()
   const recentGreetings = []
   let greetingQueue = Promise.resolve()
   const nextGreeting = (context) => {
@@ -46,6 +48,21 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
     })
     greetingQueue = task.catch(() => {})
     return task
+  }
+
+  async function streamSpeech(socket, requestId, speech, performance) {
+    const audio = await ttsService.streamSpeech({ speech, performance })
+    socket.emit('tts:start', {
+      requestId,
+      contentType: audio.headers.get('content-type') || 'audio/mpeg',
+    })
+    if (audio.body) {
+      for await (const chunk of audio.body) {
+        if (!socket.connected) return
+        socket.emit('tts:chunk', { requestId, chunk: Buffer.from(chunk) })
+      }
+    }
+    socket.emit('tts:end', { requestId })
   }
   const io = new Server(httpServer, {
     cors: {
@@ -77,7 +94,13 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
     socket.emit('visitor:session', { visitorToken: visitor.visitorToken, isReturning: visitor.isReturning })
     nextGreeting({ isReturning: visitor.isReturning, timeOfDay }).then((greeting) => {
       if (sessions.has(session.id) && !session.hasPrompted) {
+        // Keep the greeting metadata for session compatibility. Playback is
+        // delivered separately through the tts:* binary events.
         socket.emit('server:ready', { socketId: session.id, greeting })
+        streamSpeech(socket, `greeting:${session.id}`, greeting).catch((error) => {
+          console.warn('Greeting TTS failed:', error.message)
+          socket.emit('tts:error', { requestId: `greeting:${session.id}`, error: 'Greeting voice unavailable.' })
+        })
       }
     }).catch((error) => {
       console.warn('Greeting generation failed:', error.message)
@@ -174,9 +197,6 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
             profile: session.profile,
             hotelProvider: session.hotelProvider,
           },
-          onDelta: (delta) => {
-            if (sessions.has(session.id)) socket.emit('ai:delta', { requestId, delta })
-          },
         })
         session.mode = result.responseMode
         session.history.push(
@@ -185,13 +205,28 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
         )
         session.history = session.history.slice(-aiConfig.session.maxHistoryMessages)
         if (sessions.has(session.id)) {
-          socket.emit('ai:response', { ...result, sessionId: session.id })
-          acknowledge({ ok: true, result: { ...result, sessionId: session.id } })
+          const socketResult = {
+            requestId,
+            responseMode: result.responseMode,
+            models: result.models,
+            authority: result.authority,
+            usage: result.usage,
+            sessionId: session.id,
+          }
+          socket.emit('ai:response', socketResult)
+          try {
+            await streamSpeech(socket, requestId, result.data.speech || result.data.reply, result.data.performance)
+          } catch (error) {
+            console.warn('TTS generation failed:', error.message)
+            socket.emit('tts:error', { requestId, error: error.message || 'Voice playback unavailable.' })
+          }
+          acknowledge({ ok: true, result: socketResult })
         }
       } catch (error) {
         const failure = { error: error.message || 'Unable to reach xAI.', status: error.status || 502 }
         if (sessions.has(session.id)) {
           socket.emit('ai:error', { ...failure, sessionId: session.id })
+          socket.emit('tts:error', { requestId, error: failure.error })
           acknowledge({ ok: false, ...failure, sessionId: session.id })
         }
       } finally {
