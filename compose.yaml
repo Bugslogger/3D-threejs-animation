@@ -1,0 +1,18 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    image: jarvis-backend:local
+    env_file:
+      - ./backend/.env
+    environment:
+      PORT: "5000"
+      VISITOR_SESSION_FILE: /app/data/visitor-secret
+    ports:
+      - "${BACKEND_PORT:-5000}:5000"
+    volumes:
+      - visitor_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  visitor_data:

@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nodemon --use-system-ca --watch server.js",
-    "start": "nodemon --use-system-ca server.js",
+    "dev": "node --watch --use-system-ca server.js",
+    "start": "node --use-system-ca server.js",
     "test": "node --test"
   },
   "dependencies": {

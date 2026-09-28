@@ -1,12 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { aiConfig, getVisitorSecret } from '../utils/ai.config.js'
+import { aiConfig, getVisitorSecret, getVisitorSecretFile } from '../utils/ai.config.js'
 
 let processSecret
 
 function localSecret() {
   if (processSecret) return processSecret
-  const path = new URL('../.visitor-secret', import.meta.url)
+  const path = getVisitorSecretFile() || new URL('../.visitor-secret', import.meta.url)
   try {
     processSecret = readFileSync(path, 'utf8').trim()
   } catch (error) {

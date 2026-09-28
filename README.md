@@ -32,6 +32,17 @@ Then start the backend:
 node --use-system-ca server.js
 ```
 
+**Backend with Docker**
+
+Copy `backend/.env.example` to `backend/.env`, set `XAI_API_KEY`, and set `CLIENT_ORIGIN` to the browser app's origin. From the repository root, run:
+
+```powershell
+docker compose up --build -d backend
+docker compose ps
+```
+
+The API is available at `http://localhost:5000/api/health` by default. If host port 5000 is occupied, set `BACKEND_PORT` in your shell or a root `.env` file and set the browser's `VITE_SOCKET_URL` to the matching backend URL; the container still listens on port 5000. Use `docker compose logs -f backend` for logs and `docker compose down` to stop it. Compose keeps the visitor signing secret in the `visitor_data` volume across container recreations. Set `JARVIS_VISITOR_SECRET` in `backend/.env` when running multiple backend instances so they validate the same visitor tokens. The Docker image uses Node 22 and installs production dependencies from the lockfile.
+
 **Browser client**
 
 ```powershell

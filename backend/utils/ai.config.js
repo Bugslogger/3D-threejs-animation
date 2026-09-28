@@ -2,10 +2,10 @@
 // remain in jarvis.config.js.
 export const aiConfig = Object.freeze({
   xai: Object.freeze({
-    baseURL: 'https://api.x.ai/v1',
+    baseURL: "https://api.x.ai/v1",
     timeoutMs: 120_000,
     maxOutputTokens: 4_096,
-    reasoningEffort: 'low',
+    reasoningEffort: "low",
     stream: true,
   }),
   greeting: Object.freeze({
@@ -29,17 +29,18 @@ export const aiConfig = Object.freeze({
   session: Object.freeze({ maxHistoryMessages: 50 }),
   server: Object.freeze({
     defaultPort: 5_000,
-    defaultClientOrigin: 'http://localhost:5173',
+    defaultClientOrigin: "http://localhost:5173",
     useSystemCAByDefault: true,
     additionalAllowedOrigins: Object.freeze([
-      'exp://192.168.1.7:8081',
-      'exp://192.168.1.7:8082',
-      'http://192.168.1.7:8081',
-      'http://192.168.1.7:8082',
-      'https://odus-ai-interface.firebaseapp.com'
+      "exp://192.168.1.7:8081",
+      "exp://192.168.1.7:8082",
+      "http://192.168.1.7:8081",
+      "http://192.168.1.7:8082",
+      "https://odus-ai-interface.firebaseapp.com",
+      "https://odus-ai-interface.web.app",
     ]),
   }),
-})
+});
 
 // Read environment settings when requested so tests and deployments can set
 // them after modules are imported. Secrets are never exported as constants.
@@ -48,22 +49,26 @@ export function getXaiSettings() {
     apiKey: process.env.XAI_API_KEY?.trim(),
     baseURL: process.env.XAI_BASE_URL || aiConfig.xai.baseURL,
     timeout: aiConfig.xai.timeoutMs,
-  }
+  };
 }
 
 export function getHotelProviderSettings() {
   return {
     baseURL: process.env.HOTEL_PROVIDER_BASE_URL,
     apiKey: process.env.HOTEL_PROVIDER_API_KEY,
-  }
+  };
 }
 
 export function getControlToken() {
-  return process.env.JARVIS_CONTROL_TOKEN
+  return process.env.JARVIS_CONTROL_TOKEN;
 }
 
 export function getVisitorSecret() {
-  return process.env.JARVIS_VISITOR_SECRET?.trim()
+  return process.env.JARVIS_VISITOR_SECRET?.trim();
+}
+
+export function getVisitorSecretFile() {
+  return process.env.VISITOR_SESSION_FILE?.trim();
 }
 
 export function getServerSettings() {
@@ -73,5 +78,5 @@ export function getServerSettings() {
       process.env.CLIENT_ORIGIN || aiConfig.server.defaultClientOrigin,
       ...aiConfig.server.additionalAllowedOrigins,
     ],
-  }
+  };
 }
