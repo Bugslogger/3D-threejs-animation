@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
+import config from './config'
 
-const socketServerUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
+const socketServerUrl = config.socketServerUrl
 const listeningSilenceTimeout = 80000
 const visitorStorageKey = 'jarvis-visitor-session'
+const audioReadyStorageKey = 'jarvis-audio-ready'
 
 function savedVisitorToken() {
   try {
@@ -25,12 +27,11 @@ export default function VoiceAssistant() {
   const socketRef = useRef(null)
   const activeRequestRef = useRef(null)
   const requestCounterRef = useRef(0)
-  const greetingTimerRef = useRef(null)
-  const pendingGreetingRef = useRef(null)
   const silenceTimerRef = useRef(null)
   const autoListenTimerRef = useRef(null)
   const isListeningRef = useRef(false)
   const isSpeakingRef = useRef(false)
+  const userInteractedRef = useRef(false)
   const transcriptUpdateTimerRef = useRef(null)
   const transcriptRef = useRef('')
   const autoListenRef = useRef(true)
@@ -69,6 +70,7 @@ export default function VoiceAssistant() {
   }
 
   const drainStreamSpeech = () => {
+    if (!userInteractedRef.current) return
     if (streamSpeakingRef.current) return
     const nextChunk = streamQueueRef.current.shift()
     if (!nextChunk) {
@@ -127,8 +129,16 @@ export default function VoiceAssistant() {
     drainStreamSpeech()
   }
 
+  const canAutoplayAudio = () => {
+    try {
+      return window.localStorage.getItem(audioReadyStorageKey) === 'true'
+    } catch {
+      return false
+    }
+  }
+
   const speakText = (text) => {
-    if (!text) return
+    if (!text || (!userInteractedRef.current && !canAutoplayAudio())) return
     const synthesis = window.speechSynthesis
     if (!synthesis) {
       setError('TTS is unavailable in this browser.')
@@ -154,7 +164,7 @@ export default function VoiceAssistant() {
     }
     utterance.onerror = (event) => {
       setSpeaking(false)
-      if (event.error !== 'canceled' && event.error !== 'interrupted') {
+      if (event.error !== 'canceled' && event.error !== 'interrupted' && event.error !== 'not-allowed') {
         setError(`Voice playback failed: ${event.error}`)
       }
     }
@@ -165,7 +175,9 @@ export default function VoiceAssistant() {
       synthesis.resume()
       synthesis.speak(utterance)
     } catch (error) {
-      setError(`Voice playback failed: ${error.message}`)
+      if (error.message !== 'not-allowed') {
+        setError(`Voice playback failed: ${error.message}`)
+      }
     }
   }
 
@@ -194,21 +206,6 @@ export default function VoiceAssistant() {
 
   useEffect(() => {
     const synthesis = window.speechSynthesis
-    const playPendingGreeting = () => {
-      const greeting = pendingGreetingRef.current
-      if (!greeting) return
-      pendingGreetingRef.current = null
-      window.clearTimeout(greetingTimerRef.current)
-      speakText(greeting)
-    }
-    const updateVoices = () => {
-      const availableVoices = synthesis.getVoices()
-      if (availableVoices.length > 0) playPendingGreeting()
-    }
-    if (synthesis) {
-      updateVoices()
-      synthesis.addEventListener('voiceschanged', updateVoices)
-    }
 
     const socket = io(socketServerUrl, {
       auth: {
@@ -234,10 +231,9 @@ export default function VoiceAssistant() {
       if (!greeting) return
       setError('')
       setReply(greeting)
-      if (!('speechSynthesis' in window)) return
-      pendingGreetingRef.current = greeting
-      window.clearTimeout(greetingTimerRef.current)
-      greetingTimerRef.current = window.setTimeout(playPendingGreeting, synthesis.getVoices().length > 0 ? 250 : 2000)
+      if (canAutoplayAudio() && 'speechSynthesis' in window) {
+        window.setTimeout(() => speakText(greeting), 250)
+      }
     })
     socket.on('connect_error', () => setError('Unable to connect to the assistant server.'))
     socket.on('ai:delta', ({ requestId, delta }) => {
@@ -252,9 +248,6 @@ export default function VoiceAssistant() {
       window.clearTimeout(autoListenTimerRef.current)
       recognitionRef.current?.abort()
       window.clearTimeout(transcriptUpdateTimerRef.current)
-      window.clearTimeout(greetingTimerRef.current)
-      pendingGreetingRef.current = null
-      synthesis?.removeEventListener('voiceschanged', updateVoices)
       synthesis?.cancel()
       setSpeaking(false)
       socket.disconnect()
@@ -380,6 +373,21 @@ export default function VoiceAssistant() {
     }
   }
 
+  const handleVoiceButtonClick = () => {
+    userInteractedRef.current = true
+    try {
+      window.localStorage.setItem(audioReadyStorageKey, 'true')
+    } catch {
+      // Voice remains enabled for this page session when storage is unavailable.
+    }
+    window.speechSynthesis?.resume()
+    if (isListening) {
+      stopListening(true)
+    } else {
+      startListening(false)
+    }
+  }
+
   return (
     <section className="voice-assistant" aria-live="polite">
       {(transcript || reply || error) && (
@@ -389,7 +397,7 @@ export default function VoiceAssistant() {
           {error && <p className="voice-error">{error}</p>}
         </div>
       )}
-      <button className={`sound-button ${isListening ? 'is-listening' : ''}`} onClick={() => isListening ? stopListening(true) : startListening(false)} aria-label={isListening ? 'Stop listening' : 'Speak to JARVIS'}>
+      <button className={`sound-button ${isListening ? 'is-listening' : ''}`} onClick={handleVoiceButtonClick} aria-label={isListening ? 'Stop listening' : 'Speak to JARVIS'}>
         <span className="sound-waves" aria-hidden="true">
           <span /><span /><span /><span /><span />
         </span>
