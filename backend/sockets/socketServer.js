@@ -5,9 +5,9 @@ import { createHotelDelegation } from '../services/hotelDelegation.js'
 import { createHotelProvider, hotelProviderConfigured } from '../services/hotelProvider.js'
 import { listTools } from '../services/toolSystem.js'
 import { localGreetingPeriod, resolveVisitorSession } from '../services/visitorSession.js'
-import { createTtsService } from '../layers/tts/ttsService.js'
 import { aiConfig, getControlToken, getServerSettings } from '../utils/ai.config.js'
 import { currentMode } from '../utils/friday.config.js'
+import { createXaiRealtimeSession } from '../layers/realtime/xai/session.js'
 
 function controlTokenMatches(value) {
   const expected = getControlToken()
@@ -18,9 +18,20 @@ function controlTokenMatches(value) {
     && timingSafeEqual(providedBytes, expectedBytes)
 }
 
+function normalizeAudioChunk(value) {
+  if (Buffer.isBuffer(value)) return value
+  if (value instanceof ArrayBuffer) return Buffer.from(new Uint8Array(value))
+  if (value instanceof Uint8Array) return Buffer.from(value)
+  // Socket.IO/JSON transports can represent a serialized Buffer as
+  // { type: 'Buffer', data: [...] }.
+  if (value && value.type === 'Buffer' && Array.isArray(value.data)) return Buffer.from(value.data)
+  if (value && Array.isArray(value.data)) return Buffer.from(value.data)
+  return null
+}
+
 function toolStatus(session) {
   return {
-    builtIn: listTools(),
+      builtIn: listTools(),
     hotel: {
       configured: hotelProviderConfigured(),
       connected: Boolean(session.hotelProvider),
@@ -35,7 +46,6 @@ function toolStatus(session) {
 
 export function createSocketServer(httpServer, allowedOrigins = getServerSettings().allowedOrigins, { greetingGenerator = generateGreeting } = {}) {
   const sessions = new Map()
-  const ttsService = createTtsService()
   const recentGreetings = []
   let greetingQueue = Promise.resolve()
   const nextGreeting = (context) => {
@@ -50,20 +60,6 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
     return task
   }
 
-  async function streamSpeech(socket, requestId, speech, performance) {
-    const audio = await ttsService.streamSpeech({ speech, performance })
-    socket.emit('tts:start', {
-      requestId,
-      contentType: audio.headers.get('content-type') || 'audio/mpeg',
-    })
-    if (audio.body) {
-      for await (const chunk of audio.body) {
-        if (!socket.connected) return
-        socket.emit('tts:chunk', { requestId, chunk: Buffer.from(chunk) })
-      }
-    }
-    socket.emit('tts:end', { requestId })
-  }
   const io = new Server(httpServer, {
     cors: {
       origin: allowedOrigins,
@@ -86,6 +82,7 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
       profile: null,
       grants: [],
       hasPrompted: false,
+      realtime: null,
     }
     sessions.set(socket.id, session)
     socket.data.sessionId = session.id
@@ -97,10 +94,6 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
         // Keep the greeting metadata for session compatibility. Playback is
         // delivered separately through the tts:* binary events.
         socket.emit('server:ready', { socketId: session.id, greeting })
-        streamSpeech(socket, `greeting:${session.id}`, greeting).catch((error) => {
-          console.warn('Greeting TTS failed:', error.message)
-          socket.emit('tts:error', { requestId: `greeting:${session.id}`, error: 'Greeting voice unavailable.' })
-        })
       }
     }).catch((error) => {
       console.warn('Greeting generation failed:', error.message)
@@ -109,6 +102,59 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
       }
     })
     socket.emit('tools:status', toolStatus(session))
+
+    const startRealtime = () => {
+      session.realtime?.close()
+      const realtimeRequestId = `realtime:${session.id}`
+      session.realtime = createXaiRealtimeSession({
+          onAudioStart: () => socket.emit('tts:start', { requestId: realtimeRequestId, contentType: 'audio/pcm;rate=24000' }),
+          onAudio: (chunk) => socket.emit('tts:chunk', { requestId: realtimeRequestId, chunk }),
+          onAudioEnd: () => socket.emit('tts:end', { requestId: realtimeRequestId }),
+          onError: (error) => socket.emit('tts:error', { requestId: realtimeRequestId, error }),
+          onFunctionCall: async (event, realtimeSocket) => {
+            try {
+              const args = typeof event.arguments === 'string'
+                ? JSON.parse(event.arguments || '{}')
+                : (event.arguments && typeof event.arguments === 'object' ? event.arguments : {})
+              const { authorizeToolCall, executeTool } = await import('../services/toolSystem.js')
+              const authority = authorizeToolCall({ name: event.name, arguments: args }, session.grants)
+              const result = await executeTool(authority)
+              const output = result.verified
+                ? result.report
+                : `Tool failed: ${result.error || authority.reason || 'unverified result'}`
+              realtimeSocket.send({
+                type: 'conversation.item.create',
+                item: { type: 'function_call_output', call_id: event.call_id, output },
+              })
+              realtimeSocket.send({ type: 'response.create' })
+            } catch (error) {
+              socket.emit('tts:error', { requestId: realtimeRequestId, error: error.message })
+            }
+          },
+      })
+      return session.realtime
+    }
+
+    socket.on('realtime:start', (_payload, acknowledge = () => {}) => {
+      try {
+        startRealtime()
+        acknowledge({ ok: true })
+      } catch (error) {
+        acknowledge({ ok: false, error: error.message || 'Unable to start realtime voice.' })
+      }
+    })
+
+    socket.on('audio:chunk', (chunk) => {
+      if (!session.realtime) startRealtime()
+      const bytes = normalizeAudioChunk(chunk)
+      if (bytes?.length) session.realtime?.appendAudio(bytes)
+    })
+
+    socket.on('realtime:stop', (_payload, acknowledge = () => {}) => {
+      session.realtime?.close()
+      session.realtime = null
+      acknowledge({ ok: true })
+    })
 
     socket.on('tools:status', (_payload, acknowledge = () => {}) => {
       acknowledge({ ok: true, status: toolStatus(session) })
@@ -214,12 +260,6 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
             sessionId: session.id,
           }
           socket.emit('ai:response', socketResult)
-          try {
-            await streamSpeech(socket, requestId, result.data.speech || result.data.reply, result.data.performance)
-          } catch (error) {
-            console.warn('TTS generation failed:', error.message)
-            socket.emit('tts:error', { requestId, error: error.message || 'Voice playback unavailable.' })
-          }
           acknowledge({ ok: true, result: socketResult })
         }
       } catch (error) {
@@ -235,6 +275,7 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
     })
 
     socket.on('disconnect', () => {
+      session.realtime?.close()
       sessions.delete(session.id)
       session.requests.clear()
       console.log(`Socket disconnected: ${session.id}`)

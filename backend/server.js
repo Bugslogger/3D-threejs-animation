@@ -4,7 +4,6 @@ import cors from "cors";
 import express from "express";
 import aiRoutes from "./routes/aiRoutes.js";
 import healthRoutes from "./routes/healthRoutes.js";
-import ttsRoutes from "./routes/ttsRoutes.js";
 import { createSocketServer } from "./sockets/socketServer.js";
 import { aiConfig, getServerSettings } from "./utils/ai.config.js";
 
@@ -23,7 +22,6 @@ app.use(express.json());
 app.set("io", io);
 app.use("/api", healthRoutes);
 app.use("/api/ai", aiRoutes);
-app.use("/api/tts", ttsRoutes);
 
 app.use((_request, response) => {
   response.status(404).json({ error: "Route not found" });
