@@ -8,6 +8,7 @@ import { localGreetingPeriod, resolveVisitorSession } from '../services/visitorS
 import { aiConfig, getControlToken, getServerSettings } from '../utils/ai.config.js'
 import { currentMode } from '../utils/friday.config.js'
 import { createXaiRealtimeSession } from '../layers/realtime/xai/session.js'
+import { interpretToolResponse, responseText } from '../layers/response/responseInterpreter.js'
 
 function controlTokenMatches(value) {
   const expected = getControlToken()
@@ -119,12 +120,14 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
               const { authorizeToolCall, executeTool } = await import('../services/toolSystem.js')
               const authority = authorizeToolCall({ name: event.name, arguments: args }, session.grants)
               const result = await executeTool(authority)
-              const output = result.verified
-                ? result.report
-                : `Tool failed: ${result.error || authority.reason || 'unverified result'}`
+              const outputText = responseText(interpretToolResponse({
+                toolName: event.name,
+                toolResult: result,
+                authority,
+              }))
               realtimeSocket.send({
                 type: 'conversation.item.create',
-                item: { type: 'function_call_output', call_id: event.call_id, output },
+                item: { type: 'function_call_output', call_id: String(event.call_id), output: outputText },
               })
               realtimeSocket.send({ type: 'response.create' })
             } catch (error) {
