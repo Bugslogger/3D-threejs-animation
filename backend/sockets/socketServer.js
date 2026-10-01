@@ -52,6 +52,7 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
 
   async function streamSpeech(socket, requestId, speech, performance) {
     const audio = await ttsService.streamSpeech({ speech, performance })
+    if (!audio) return
     socket.emit('tts:start', {
       requestId,
       contentType: audio.headers.get('content-type') || 'audio/mpeg',
@@ -97,7 +98,7 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
         // Keep the greeting metadata for session compatibility. Playback is
         // delivered separately through the tts:* binary events.
         socket.emit('server:ready', { socketId: session.id, greeting })
-        streamSpeech(socket, `greeting:${session.id}`, greeting).catch((error) => {
+        if (ttsService.enabled) streamSpeech(socket, `greeting:${session.id}`, greeting).catch((error) => {
           console.warn('Greeting TTS failed:', error.message)
           socket.emit('tts:error', { requestId: `greeting:${session.id}`, error: 'Greeting voice unavailable.' })
         })
@@ -214,7 +215,7 @@ export function createSocketServer(httpServer, allowedOrigins = getServerSetting
             sessionId: session.id,
           }
           socket.emit('ai:response', socketResult)
-          try {
+          if (ttsService.enabled) try {
             await streamSpeech(socket, requestId, result.data.speech || result.data.reply, result.data.performance)
           } catch (error) {
             console.warn('TTS generation failed:', error.message)

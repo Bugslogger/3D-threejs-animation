@@ -7,6 +7,7 @@ const defaultConfig = Object.freeze({
 
 export function getElevenLabsConfig() {
   return {
+    enabled: process.env.ELEVENLABS_ENABLED === 'true',
     baseURL: process.env.ELEVENLABS_BASE_URL?.trim() || defaultConfig.baseURL,
     apiKey: process.env.ELEVENLABS_API_KEY?.trim(),
     voiceId: process.env.ELEVENLABS_VOICE_ID?.trim() || 'JBFqnCBsd6RMkjVDRZzb',
